@@ -1,0 +1,23 @@
+{
+  "name": "ion-mahjong-online",
+  "version": "1.0.0",
+  "description": "離子麻將多人連線房間制 (Ion Mahjong Online)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node tests/gameLogic.test.js"
+  },
+  "keywords": [
+    "mahjong",
+    "chemistry",
+    "socket.io",
+    "multiplayer",
+    "education"
+  ],
+  "author": "黃子閎",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}

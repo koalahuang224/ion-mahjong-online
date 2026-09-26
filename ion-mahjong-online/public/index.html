@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>離子麻將 - 多人連線房間版</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+    <!-- 手機直向旋轉提醒遮罩 -->
+    <div id="portrait-warning">
+        <div class="icon">📱 ➔ 🔄</div>
+        <p><b>為了最佳的牌桌體驗，請將手機旋轉為橫向遊玩</b></p>
+    </div>
+
+    <div id="game-viewport">
+        <div id="game-board">
+            
+            <!-- 頂部工具列 -->
+            <header id="table-toolbar">
+                <div class="toolbar-left">
+                    <span id="room-badge" class="badge">房號：<b id="toolbar-room-id">------</b></span>
+                    <span id="round-badge" class="badge" style="background:#2b5c3a; color:#ffeb3b; border-color:#ffeb3b;">第 1 / 4 局 (東風局)</span>
+                    <span id="status-badge" class="badge badge-info">狀態：等待開局</span>
+                </div>
+                <div class="toolbar-right">
+                    <button class="bar-btn" id="copy-link-btn" style="display:none;">🔗 複製邀請連結</button>
+                    <button class="bar-btn" id="rules-btn">📖 規則</button>
+                    <button class="bar-btn" id="music-toggle">🔊 音樂：關</button>
+                </div>
+            </header>
+
+            <!-- 對家 (上方座位) -->
+            <div id="seat-top" class="seat-container"></div>
+
+            <!-- 主桌中層：左家 + 中央戰場 + 右家 -->
+            <div id="table-middle">
+                <!-- 上家 (左側座位) -->
+                <div id="seat-left" class="seat-container"></div>
+
+                <!-- 中央主戰場 -->
+                <div id="table-center">
+                    <div id="center-status-bar">
+                        <span id="turn-indicator">輪到：等待中</span>
+                        <span id="turn-timer-text">15s</span>
+                    </div>
+                    <div id="turn-timer-bar">
+                        <div id="turn-timer-progress"></div>
+                    </div>
+
+                    <!-- 最近棄牌聚焦槽 -->
+                    <div id="recent-discard-container">
+                        <div class="spotlight-label">⚡ 最新棄牌</div>
+                        <div id="spotlight-card-slot">
+                            <span class="empty-slot-text">無</span>
+                        </div>
+                        <div id="claim-banner" style="display:none;">等待吃／胡裁決中...</div>
+                    </div>
+
+                    <!-- 歷史棄牌網格 -->
+                    <div id="history-header">
+                        <span>歷史棄牌</span>
+                        <span id="deck-counter">牌庫剩餘: 112 張</span>
+                    </div>
+                    <div id="discard-grid"></div>
+                </div>
+
+                <!-- 下家 (右側座位) -->
+                <div id="seat-right" class="seat-container"></div>
+            </div>
+
+            <!-- 自己 (下方座位) + 手牌與動作操作列 -->
+            <div id="seat-bottom">
+                <div id="action-timer-panel" aria-live="polite">
+                    <div class="action-timer-head">
+                        <span>操作倒數</span>
+                        <strong id="action-timer-text">-- 秒</strong>
+                    </div>
+                    <div id="action-timer-track"><div id="action-timer-progress"></div></div>
+                </div>
+                <div id="player-profile-bar">
+                    <div id="my-info" class="seat-info-box">
+                        <span id="my-name">玩家 (您)</span>
+                        <span id="my-points" class="points-badge">50 點</span>
+                    </div>
+                    <div id="hand-controls-row">
+                    <div id="hand-sort-controls">
+                        <button class="btn btn-sm btn-gold" id="sort-hand-btn">📊 整理手牌</button>
+                    </div>
+                    <div id="bottom-action-bar" aria-label="本回合操作"></div>
+                </div>
+                <div id="my-exposed-rack" class="exposed-rack"></div>
+                </div>
+
+                <!-- 自己的手牌容器 -->
+                <div id="my-hand-container"></div>
+
+            </div>
+
+            <!-- 大廳介面 (建立/加入房間) -->
+            <div id="lobby-screen" class="overlay-screen">
+                <div class="panel-box">
+                    <h1>離子麻將 (線上對戰版)</h1>
+                    <p style="color: #c8e6c9; margin-bottom: 25px;">湊出電中性離子組合，奪取電荷勝分！</p>
+                    
+                    <div class="input-row">
+                        <label>玩家暱稱：</label>
+                        <input type="text" id="player-name-input" placeholder="請輸入暱稱" maxlength="8" value="化學大師">
+                    </div>
+
+                    <div style="margin: 20px 0;">
+                        <button class="btn btn-green" id="create-room-btn" style="width: 100%; font-size: 20px; padding: 12px;">🀄 建立新房間</button>
+                    </div>
+
+                    <div style="position: relative; margin: 25px 0;">
+                        <hr style="border: 0; border-top: 1px solid #446d50;">
+                        <span style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: #1e452a; padding: 0 15px; color: #a5d6a7; font-size: 14px;">或輸入房號加入</span>
+                    </div>
+
+                    <div class="input-row">
+                        <input type="text" id="room-code-input" placeholder="輸入 6 位數房號" maxlength="6" style="text-align: center; letter-spacing: 3px; font-weight: bold;">
+                        <button class="btn btn-gold" id="join-room-btn">加入房間</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 等待室介面 -->
+            <div id="waiting-screen" class="overlay-screen" style="display:none;">
+                <div class="panel-box" style="width: 720px;">
+                    <h2>房間號碼：<span id="display-room-id" style="color: #ffeb3b; font-size: 32px; letter-spacing: 4px;">------</span></h2>
+                    <p style="color: #c8e6c9;">請將房號或連結分享給朋友，湊滿 4 人即可開局</p>
+
+                    <div class="waiting-seats" id="waiting-seats-container"></div>
+
+                    <div style="display: flex; justify-content: center; gap: 15px; margin-top: 25px;">
+                        <button class="btn btn-blue" id="add-bot-btn" style="display:none;">🤖 加入測試機器人</button>
+                        <button class="btn btn-green" id="start-game-btn" style="display:none; font-size: 22px; padding: 12px 35px;">🚀 開始遊戲</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 規則彈窗 -->
+            <div id="rules-modal" class="overlay-screen" style="display:none; z-index: 3000;">
+                <div class="panel-box" style="width: 680px; text-align: left;">
+                    <h2 style="text-align: center;">離子麻將規則說明</h2>
+                    <ul style="line-height: 1.7; font-size: 16px;">
+                        <li><b>目標：</b>手牌湊成完全電中性的離子組合（陽離子電荷總和 = 陰離子電荷總和）即可胡牌。</li>
+                        <li><b>牌型辨識：</b>
+                            <ul>
+                                <li><span style="color:#ff5252;"><b>陽離子 (+)</b></span>：紅色標記</li>
+                                <li><span style="color:#42a5f5;"><b>陰離子 (−)</b></span>：藍色標記</li>
+                                <li><span style="color:#66bb6a;"><b>係數牌 (×)</b></span>：綠色數字</li>
+                            </ul>
+                        </li>
+                        <li><b>操作防手滑：</b>手機點擊第 1 下選取卡牌（向上彈起），點擊第 2 下或點擊「確認出牌」打出。</li>
+                        <li><b>吃牌限制：</b>僅能吃「上家」打出的牌，已外露的組合不可拆散。</li>
+                        <li><b>化學加番：</b>
+                            <ul>
+                                <li><b>酸鹼中和：</b>H⁺ + OH⁻ 形成水分子 <b>+3 點</b></li>
+                                <li><b>常見沉澱：</b>BaSO₄、CaCO₃、BaCO₃、Mg(OH)₂、Fe(OH)₃、Al(OH)₃ <b>+5 點</b></li>
+                            </ul>
+                        </li>
+                        <li><b>出牌倒數：</b>每回合摸打限時 15 秒，逾時將由系統自動摸打。</li>
+                    </ul>
+                    <div style="text-align: center; margin-top: 20px;">
+                        <button class="btn btn-gold" id="close-rules-btn">我瞭解了</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 結算彈窗 (本局結算與即時排名) -->
+            <div id="score-modal">
+                <div class="modal-box" id="settlement-card" style="max-width: 520px; width: 90%; text-align: center;">
+                    <div id="score-content" style="white-space: pre-wrap; font-size: 16px; line-height: 1.7; margin: 15px 0 20px 0; text-align: left; background: rgba(0, 0, 0, 0.45); padding: 18px 22px; border-radius: 8px; color: #fff; max-height: 65vh; overflow-y: auto; border: 1px solid rgba(255, 255, 255, 0.1);"></div>
+                    <div style="margin-top: 15px;">
+                        <button class="btn btn-green" id="score-next-btn" style="font-size: 18px; padding: 10px 36px;">開始下一局</button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+        <audio id="bgm" loop preload="auto">
+        <source src="bgm.mp3" type="audio/mpeg">
+        <source src="assets/bgm.mp3" type="audio/mpeg">
+    </audio>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="js/client.js"></script>
+</body>
+</html>
