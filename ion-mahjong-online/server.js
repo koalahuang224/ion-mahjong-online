@@ -114,6 +114,8 @@ function makePlayerView(room, playerId) {
         totalRounds: room.maxRounds,
         dealerSeat: room.dealerSeat || 0,
         players: room.players.map(p => ({
+            // 僅是房間內臨時玩家 ID；不含 reconnectToken，供房主在等待室指定要移除的座位。
+            id: p.id,
             seat: p.seat,
             name: p.name,
             points: p.points,
@@ -173,14 +175,19 @@ function runAiDiscard(room, player) {
 
 function resumeHumanTurnTimer(room, player) {
     if (!player.socketId || isAiControlled(player)) return;
+    let restarted = false;
     if (room.phase === 'DRAW' && room.currentTurn === player.seat) {
         setRoomTimer(room, DRAW_TIMEOUT_SECONDS, () => executeDraw(room, player, true));
+        restarted = true;
     } else if (room.phase === 'DISCARD' && room.currentTurn === player.seat) {
         setRoomTimer(room, DISCARD_TIMEOUT_SECONDS, () => {
             const fallbackId = player.lastDrawnCardId || player.hand[player.hand.length - 1]?.id;
             if (fallbackId) executeDiscard(room, player, fallbackId);
         });
+        restarted = true;
     }
+    // 重連會產生新的 deadline；必須再推送一次，客戶端才能更新讀條。
+    if (restarted) broadcastState(room);
 }
 
 function activateAiTakeover(room, player) {
@@ -193,16 +200,16 @@ function activateAiTakeover(room, player) {
         if (replacement) room.hostPlayerId = replacement.id;
     }
 
-    broadcastState(room);
-    if (room.currentTurn === player.seat) {
+    if (room.currentTurn === player.seat && (room.phase === 'DRAW' || room.phase === 'DISCARD')) {
         clearRoomTimer(room);
-        if (room.phase === 'DRAW') {
-            setTimeout(() => {
-                if (isAiControlled(player)) executeDraw(room, player);
-            }, 800);
-        } else if (room.phase === 'DISCARD') {
-            setTimeout(() => runAiDiscard(room, player), 800);
-        }
+    }
+    broadcastState(room);
+    if (room.currentTurn === player.seat && room.phase === 'DRAW') {
+        setTimeout(() => {
+            if (isAiControlled(player)) executeDraw(room, player);
+        }, 800);
+    } else if (room.currentTurn === player.seat && room.phase === 'DISCARD') {
+        setTimeout(() => runAiDiscard(room, player), 800);
     }
     if (room.phase === 'CLAIM_WINDOW') {
         setTimeout(() => {
@@ -226,21 +233,21 @@ function enterDrawPhase(room, seat) {
         return;
     }
 
-    broadcastState(room);
-
     // 若是機器人，延遲 1 秒自動摸牌
     if (isAiControlled(curPlayer)) {
+        // AI 沒有供真人操作的倒數；仍須同步階段讓所有人看見回合移動。
+        broadcastState(room);
         setTimeout(() => {
             if (isAiControlled(curPlayer)) executeDraw(room, curPlayer);
         }, 800);
         return;
     }
 
-    // 真人有 10 秒點擊摸牌；逾時才由伺服器自動摸打。
+    // 先建立 deadline，再同步畫面。若反過來做，客戶端會收到 null，造成倒數只在首次出現。
     setRoomTimer(room, DRAW_TIMEOUT_SECONDS, () => {
-        // 逾時自動摸牌並自動打出
         executeDraw(room, curPlayer, true);
     });
+    broadcastState(room);
 }
 
 // 執行摸牌
@@ -256,23 +263,23 @@ function executeDraw(room, player, autoDiscard = false) {
     player.lastDrawnCardId = drawnCard.id;
     room.phase = 'DISCARD';
 
-    broadcastState(room);
-
     if (autoDiscard) {
-        // 逾時自動打出剛摸到的牌
+        // 摸牌逾時直接打出，不建立一個玩家看不到也無法操作的出牌倒數。
         executeDiscard(room, player, drawnCard.id);
         return;
     }
 
     if (isAiControlled(player)) {
+        broadcastState(room);
         setTimeout(() => runAiDiscard(room, player), 1000);
         return;
     }
 
-    // 摸牌後給真人 45 秒思考與出牌。
+    // 同樣必須在同步前設定 deadline。
     setRoomTimer(room, DISCARD_TIMEOUT_SECONDS, () => {
         executeDiscard(room, player, drawnCard.id);
     });
+    broadcastState(room);
 }
 
 // 執行出牌
@@ -321,6 +328,10 @@ function executeDiscard(room, player, cardId) {
     // 開啟 25 秒裁決窗口，讓玩家有足夠時間挑選吃牌組合。
     room.phase = 'CLAIM_WINDOW';
     room.pendingClaims = eligibleClaims;
+    // 裁決倒數必須先寫入狀態，所有候選玩家才會看見同一個 25 秒讀條。
+    setRoomTimer(room, CLAIM_TIMEOUT_SECONDS, () => {
+        resolveClaims(room);
+    });
     broadcastState(room);
 
     // 檢查候選者是否有 Bot，Bot 自動在 800ms 後 PASS
@@ -333,9 +344,6 @@ function executeDiscard(room, player, cardId) {
         }
     });
 
-    setRoomTimer(room, CLAIM_TIMEOUT_SECONDS, () => {
-        resolveClaims(room);
-    });
 }
 
 // 記錄玩家對裁決窗口的回應
@@ -408,15 +416,16 @@ function resolveClaims(room) {
             // 吃牌後跳過摸牌，直接進入該玩家的出牌階段
             room.phase = 'DISCARD';
             room.currentTurn = nextSeat;
-            broadcastState(room);
 
             if (isAiControlled(eater)) {
+                broadcastState(room);
                 setTimeout(() => runAiDiscard(room, eater), 1000);
             } else {
-                // 吃牌後同樣給真人 45 秒選擇要打出的牌。
+                // 吃牌後同樣給真人 45 秒選擇要打出的牌，先同步 deadline。
                 setRoomTimer(room, DISCARD_TIMEOUT_SECONDS, () => {
                     executeDiscard(room, eater, eater.hand[eater.hand.length - 1].id);
                 });
+                broadcastState(room);
             }
             return;
         }
@@ -561,6 +570,19 @@ function initRound(room, firstSeat = 0) {
 
     // 設定首摸座位 (首摸者固定為座位 0) 並進入摸牌階段
     enterDrawPhase(room, firstSeat);
+}
+
+// 等待室離開／房主移除玩家後，座位必須重新編號；遊戲核心以 players[seat] 存取。
+function removeWaitingPlayer(room, playerId) {
+    const target = room.players.find(p => p.id === playerId);
+    if (!target) return null;
+
+    room.players = room.players.filter(p => p.id !== playerId);
+    room.players.forEach((p, index) => { p.seat = index; });
+    if (room.hostPlayerId === playerId && room.players.length > 0) {
+        room.hostPlayerId = room.players[0].id;
+    }
+    return target;
 }
 
 // Socket 連線管理
@@ -712,6 +734,26 @@ io.on('connection', (socket) => {
         broadcastState(room);
     });
 
+    // 房主可在等待室移除真人或 AI，避免誤加 AI 後只能一路帶進牌局。
+    socket.on('remove_waiting_player', ({ playerId }) => {
+        const session = socketSessions.get(socket.id);
+        if (!session) return;
+        const room = rooms.get(session.roomId);
+        if (!room || room.status !== 'WAITING' || room.hostPlayerId !== session.playerId) return;
+        if (!playerId || playerId === room.hostPlayerId) return;
+
+        const target = room.players.find(p => p.id === playerId);
+        if (!target) return;
+        if (target.socketId) {
+            socketSessions.delete(target.socketId);
+            io.to(target.socketId).emit('room_removed', '房主已將你移出等待室。');
+            const targetSocket = io.sockets.sockets.get(target.socketId);
+            if (targetSocket) targetSocket.leave(room.id);
+        }
+        removeWaitingPlayer(room, playerId);
+        broadcastState(room);
+    });
+
     // 4. 開始遊戲
     socket.on('start_game', () => {
         const session = socketSessions.get(socket.id);
@@ -792,7 +834,8 @@ io.on('connection', (socket) => {
                 if (player.id !== room.hostPlayerId) break;
 
                 if (room.settlement.isMatchOver) {
-                    // 完整四局或有人破產：重新開始一場四局賽。
+                    // 完整四局或有人破產：回到真正的組隊等待室，保留現有成員供房主調整。
+                    clearRoomTimer(room);
                     room.players.forEach(p => {
                         p.points = STARTING_POINTS;
                         p.hand = [];
@@ -829,7 +872,7 @@ io.on('connection', (socket) => {
             player.socketId = null;
             if (room.status === 'WAITING') {
                 // 等待室中直接移除
-                room.players = room.players.filter(p => p.id !== player.id);
+                removeWaitingPlayer(room, player.id);
                 if (room.players.length === 0) {
                     rooms.delete(room.id);
                 } else {

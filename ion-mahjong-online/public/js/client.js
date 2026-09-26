@@ -1,16 +1,9 @@
 
-// 背景音樂自動播放與切換控制器
-function tryPlayBGM() {
-    const bgm = document.getElementById('bgm');
+// 背景音樂僅依玩家明確選擇播放；狀態同步與其他按鈕絕不可擅自重新開啟。
+let musicEnabled = sessionStorage.getItem('ion_music_enabled') === 'true';
+function updateMusicButton() {
     const musicBtn = document.getElementById('music-toggle');
-    if (bgm && bgm.paused) {
-        bgm.volume = 0.3;
-        bgm.play().then(() => {
-            if (musicBtn) musicBtn.innerText = '🔊 音樂：開';
-        }).catch(() => {
-            // 瀏覽器 Autoplay 政策限制時保持關閉，等待使用者點擊按鈕
-        });
-    }
+    if (musicBtn) musicBtn.innerText = musicEnabled ? '🔊 音樂：開' : '🔈 音樂：關';
 }
 // 離子麻將客戶端主邏輯 (第 14 章視覺與操作優化版)
 let socket = null;
@@ -78,7 +71,7 @@ function initApp() {
     // 按鈕綁定
     document.getElementById('create-room-btn').onclick = () => {
         const name = document.getElementById('player-name-input').value.trim() || '房主';
-        socket.emit('create_room', { playerName: name }); tryPlayBGM();
+        socket.emit('create_room', { playerName: name });
     };
 
     document.getElementById('join-room-btn').onclick = () => {
@@ -88,7 +81,7 @@ function initApp() {
             alert('請輸入正確的房號！');
             return;
         }
-        socket.emit('join_room', { roomId: code, playerName: name }); tryPlayBGM();
+        socket.emit('join_room', { roomId: code, playerName: name });
     };
 
     document.getElementById('copy-link-btn').onclick = () => {
@@ -106,7 +99,7 @@ function initApp() {
     };
 
     document.getElementById('start-game-btn').onclick = () => {
-        socket.emit('start_game'); tryPlayBGM();
+        socket.emit('start_game');
     };
 
     document.getElementById('sort-hand-btn').onclick = () => {
@@ -125,18 +118,25 @@ function initApp() {
         document.getElementById('rules-modal').style.display = 'none';
     };
 
-    // 音樂開關
+    updateMusicButton();
+    // 音樂開關：關閉後儲存選擇，任何其他操作都不能重播。
     const bgm = document.getElementById('bgm');
     const musicBtn = document.getElementById('music-toggle');
     musicBtn.onclick = () => {
-        if (bgm.paused) {
+        musicEnabled = !musicEnabled;
+        sessionStorage.setItem('ion_music_enabled', String(musicEnabled));
+        if (musicEnabled) {
             bgm.volume = 0.35;
             bgm.play().then(() => {
-                musicBtn.innerText = '🔊 音樂：開';
-            }).catch(() => {});
+                updateMusicButton();
+            }).catch(() => {
+                musicEnabled = false;
+                sessionStorage.setItem('ion_music_enabled', 'false');
+                updateMusicButton();
+            });
         } else {
             bgm.pause();
-            musicBtn.innerText = '🔈 音樂：關';
+            updateMusicButton();
         }
     };
 
@@ -166,6 +166,17 @@ function initApp() {
         mySeat = state.mySeat;
         currentRoomId = state.roomId;
         renderAll();
+    });
+
+    socket.on('room_removed', (message) => {
+        sessionStorage.removeItem('ion_room_id');
+        sessionStorage.removeItem('ion_reconnect_token');
+        currentRoomId = null;
+        currentState = null;
+        document.getElementById('waiting-screen').style.display = 'none';
+        document.getElementById('score-modal').style.display = 'none';
+        document.getElementById('lobby-screen').style.display = 'flex';
+        alert(message || '你已離開房間。');
     });
 }
 
@@ -234,13 +245,18 @@ function renderAll() {
     if (currentState.status === 'WAITING') {
         lobbyScreen.style.display = 'none';
         waitingScreen.style.display = 'flex';
+        scoreModal.style.display = 'none';
+        if (timerInterval) clearInterval(timerInterval);
+        document.getElementById('action-timer-panel').style.display = 'none';
+        document.getElementById('turn-timer-progress').style.width = '0%';
+        document.getElementById('turn-timer-text').innerText = '';
         document.getElementById('status-badge').innerText = '狀態：等待中';
         renderWaitingSeats();
         return;
     } else {
         lobbyScreen.style.display = 'none';
         waitingScreen.style.display = 'none';
-        document.getElementById('status-badge').innerText = `狀態：第 ${currentState.version} 手`; tryPlayBGM();
+        document.getElementById('status-badge').innerText = `狀態：第 ${currentState.version} 手`;
     const roundBadge = document.getElementById('round-badge');
     if (roundBadge && (currentState.roundNo || currentState.roundNumber)) {
         const rNo = currentState.roundNo || currentState.roundNumber || 1;
@@ -287,6 +303,17 @@ function renderWaitingSeats() {
                 <div class="seat-name">${p.name} ${p.seat === mySeat ? '(您)' : ''}</div>
                 <div class="seat-status">${p.isAiTakeover ? '🤖 AI 託管中' : (p.isConnected ? '已就緒' : '斷線中')}</div>
             `;
+            if (isHost && !p.isHost) {
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'waiting-remove-btn';
+                removeBtn.innerText = p.isBot ? '移除 AI' : '移除玩家';
+                removeBtn.onclick = () => {
+                    if (confirm(`確定要移除「${p.name}」嗎？`)) {
+                        socket.emit('remove_waiting_player', { playerId: p.id });
+                    }
+                };
+                card.appendChild(removeBtn);
+            }
         } else {
             card.innerHTML = `
                 <div class="seat-avatar">🪑</div>

@@ -320,6 +320,18 @@ body {
     margin-bottom: 2px;
     color: #fff;
 }
+.waiting-remove-btn {
+    margin-top: 10px;
+    padding: 6px 12px;
+    border: 1px solid #ff8a80;
+    border-radius: 6px;
+    background: #8b1f1f;
+    color: #fff;
+    font-size: 13px;
+    font-weight: bold;
+    cursor: pointer;
+}
+.waiting-remove-btn:hover { background: #b52d2d; }
 .action-timer-head {
     display: flex;
     justify-content: space-between;
